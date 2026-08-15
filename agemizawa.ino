@@ -2,6 +2,10 @@
 #define PIN 2 //LEDのDINを接続したArduinoのピン（本に合わせてD2に変更）
 //#define PIN 13 //LEDのDINを接続したArduinoのピン
 #define NUM_LEDS 14 //LEDの数
+#define SENSOR_PIN A0 //音センサーを接続したピン
+
+int hitCount = 0; // 音に反応した回数
+int currentBrightness = 255; // 光の強さ（最初は最大）
 
 //NeoPixelライブラリの初期化
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
@@ -9,16 +13,51 @@ void setup(){  //Arduino初期設定：電源ON時・リセット時に実行さ
   strip.begin();
   strip.setBrightness(50); // 電力不足でのフリーズを防ぐため、明るさを少し絞っています（0〜255）
   strip.show();
+  Serial.begin(9600); // 音の大きさをパソコンで確認できるようにする
 }
 
 void loop(){ //実行したいプログラムを記述：繰返し実行される
-  rainbowUniform(5);  //一斉に色が変わるパターン
-  Strobe(0xFF,0xFF,0x00,10, 15, 100); //黄色で光るパターン
-  rainbowUniform(5);
-  Strobe(0x0B, 0x3B, 0x17, 10, 15, 100);  //蛍光緑で光るパターン
-  rainbowUniform(5);
-  Strobe(0xDF, 0x3A, 0x01, 10, 15, 100);  //オレンジで光るパターン
- }
+  int soundLevel = getSoundLevel(); // 音の大きさを測定
+
+  if (soundLevel > 60) { // ★音の感度調整（反応しすぎる場合は100などに上げ、反応しない場合は30などに下げる）
+    hitCount++; // 反応した回数を1増やす
+
+    // 5回反応するごとに色を「濃く（暗く）」していく
+    if (hitCount % 5 == 0) {
+      currentBrightness = currentBrightness - 40; // 40ずつ明度を落として濃い色にする
+      if (currentBrightness < 50) {
+        currentBrightness = 255; // 暗くなりすぎたら最初の明るさにリセットする
+      }
+    }
+
+    // ランダムRGBの代わりにHSV（色相・彩度・明度）を使うと、白っぽくならない鮮やかな「濃い色」が作れます
+    long randomHue = random(0, 65536); // 色合い（0〜65535）をランダムに
+    uint32_t color = strip.ColorHSV(randomHue, 255, currentBrightness); // 彩度はMAX(255)、明度は変動させる
+    
+    for(int i = 0; i < NUM_LEDS; i++){
+      strip.setPixelColor(i, color);
+    }
+    strip.show();
+
+    delay(100); // 0.1秒間光らせたままにする
+  } else {
+    // 音がないときは消灯する
+    setAll(0, 0, 0);
+  }
+}
+
+// 音の波の振れ幅を計算する関数（どんな環境でも安定して音を拾うため）
+int getSoundLevel() {
+  int minVal = 1023;
+  int maxVal = 0;
+  for (int i = 0; i < 30; i++) {
+    int val = analogRead(SENSOR_PIN);
+    if (val < minVal) minVal = val;
+    if (val > maxVal) maxVal = val;
+    delay(1);
+  }
+  return maxVal - minVal; 
+}
 
 //一斉に色が変化する虹色パターン
 void rainbowUniform(int SpeedDelay){
