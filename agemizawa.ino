@@ -6,6 +6,7 @@
 
 int hitCount = 0; // 音に反応した回数
 int currentBrightness = 255; // 光の強さ（最初は最大）
+float ambientNoise = 0.0; // 【追加】環境音（ノイズ）の基準レベル
 
 //NeoPixelライブラリの初期化
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
@@ -19,7 +20,14 @@ void setup(){  //Arduino初期設定：電源ON時・リセット時に実行さ
 void loop(){ //実行したいプログラムを記述：繰返し実行される
   int soundLevel = getSoundLevel(); // 音の大きさを測定
 
-  if (soundLevel > 60) { // ★音の感度調整（反応しすぎる場合は100などに上げ、反応しない場合は30などに下げる）
+  // 【ノイズキャンセリング処理】
+  // 周囲の環境音を少しずつ学習する（急な大声にはすぐ反応しないよう、ゆっくり平均化）
+  ambientNoise = (ambientNoise * 19.0 + soundLevel) / 20.0;
+
+  // 現在の音量から、学習したノイズ基準を引き算し、突出した音（ユーザーの声）だけを抽出
+  int voiceLevel = soundLevel - (int)ambientNoise;
+
+  if (voiceLevel > 30) { // ★感度調整：環境音を差し引いた上で、どれくらい大きな音で光るか
     hitCount++; // 反応した回数を1増やす
 
     // 5回反応するごとに色を「濃く（暗く）」していく
@@ -41,7 +49,7 @@ void loop(){ //実行したいプログラムを記述：繰返し実行され�
 
     delay(100); // 0.1秒間光らせたままにする
   } else {
-    // 音がないときは消灯する
+    // 音がない（環境音だけの）ときは消灯する
     setAll(0, 0, 0);
   }
 }
