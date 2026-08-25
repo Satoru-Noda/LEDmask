@@ -1,12 +1,13 @@
 #include <Adafruit_NeoPixel.h> //NeoPixel LEDを光らせるためのライブラリ
 #define PIN 2 //LEDのDINを接続したArduinoのピン（本に合わせてD2に変更）
 //#define PIN 13 //LEDのDINを接続したArduinoのピン
-#define NUM_LEDS 14 //LEDの数
+#define NUM_LEDS 20 //LEDの数
 #define SENSOR_PIN A0 //音センサーを接続したピン
 
 int hitCount = 0; // 音に反応した回数
 int currentBrightness = 255; // 光の強さ（最初は最大）
 float ambientNoise = 0.0; // 【追加】環境音（ノイズ）の基準レベル
+int consecutiveVoiceCount = 0; // 【長さフィルター用】連続で音を検知した回数
 
 //NeoPixelライブラリの初期化
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
@@ -18,30 +19,43 @@ void setup(){  //Arduino初期設定：電源ON時・リセット時に実行さ
 }
 
 void loop(){ //実行したいプログラムを記述：繰返し実行される
-  int soundLevel = getSoundLevel(); // 音の大きさを測定
+  int soundLevel = getSoundLevel(); // 音の大きさを測定（1回の測定に約30ミリ秒かかります）
 
-  // 【ノイズキャンセリング処理】
-  // 環境音の学習スピードを少し早めにする（外のノイズ変動に素早く追従して相殺する）
-  ambientNoise = (ambientNoise * 9.0 + soundLevel) / 10.0;
+  // 【ノイズキャンセリング処理の強化】
+  // 大きな声が出ている最中に、環境音の基準が跳ね上がってしまうのを防ぐため、
+  // 「普段の環境音に近い時」だけ学習を更新するようにします。
+  if (soundLevel - (int)ambientNoise < 20) {
+    ambientNoise = (ambientNoise * 9.0 + soundLevel) / 10.0;
+  }
 
-  // 現在の音量から、学習したノイズ基準を引き算し、突出した音（ユーザーの声）だけを抽出
+  // 現在の音量から、学習したノイズ基準を引き算し、突出した音（ユーザーの声）を抽出
   int voiceLevel = soundLevel - (int)ambientNoise;
 
-  // ★感度調整：しきい値を下げて、小さな声（環境音＋少しの声）でも反応するようにする
-  if (voiceLevel > 12) { 
+  // しきい値を超えているかチェック（マスク内の小さな声に反応できるよう12に設定）
+  if (voiceLevel > 22) { 
+//  if (voiceLevel > 12) { 
+    consecutiveVoiceCount++; // 連続カウントを増やす
+  } else {
+    consecutiveVoiceCount = 0; // 音が途切れたらカウントをゼロに戻す
+  }
+
+  // 【音の長さフィルター（疑似AI的なアプローチ）】
+  // 3回連続（約0.1秒間）音が続いた時だけ「人間の声」とみなす
+  // マスクにカチッと当たったような一瞬の物音（1回）は無視される
+  if (consecutiveVoiceCount >= 3) { 
     hitCount++; // 反応した回数を1増やす
 
     // 5回反応するごとに色を「濃く（暗く）」していく
     if (hitCount % 5 == 0) {
-      currentBrightness = currentBrightness - 40; // 40ずつ明度を落として濃い色にする
+      currentBrightness = currentBrightness - 40; 
       if (currentBrightness < 50) {
-        currentBrightness = 255; // 暗くなりすぎたら最初の明るさにリセットする
+        currentBrightness = 255; 
       }
     }
 
-    // ランダムRGBの代わりにHSV（色相・彩度・明度）を使うと、白っぽくならない鮮やかな「濃い色」が作れます
-    long randomHue = random(0, 65536); // 色合い（0〜65535）をランダムに
-    uint32_t color = strip.ColorHSV(randomHue, 255, currentBrightness); // 彩度はMAX(255)、明度は変動させる
+    // HSVを使って鮮やかな色を作る
+    long randomHue = random(0, 65536); 
+    uint32_t color = strip.ColorHSV(randomHue, 255, currentBrightness); 
     
     for(int i = 0; i < NUM_LEDS; i++){
       strip.setPixelColor(i, color);
@@ -49,8 +63,11 @@ void loop(){ //実行したいプログラムを記述：繰返し実行され�
     strip.show();
 
     delay(100); // 0.1秒間光らせたままにする
+    
+    // 一度光ったら、連続カウントをリセットして次の声を待つ
+    consecutiveVoiceCount = 0;
   } else {
-    // 音がない（環境音だけの）ときは消灯する
+    // 連続条件を満たしていない時（または音が無い時）は消灯する
     setAll(0, 0, 0);
   }
 }
